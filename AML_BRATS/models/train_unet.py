@@ -2,6 +2,7 @@ import torch
 
 from .train_model import train_k_fold
 from .unet import UNet
+from .data.data_loading import calculate_pos_weight
 
 LR = 1e-2
 NUM_EPOCHS = 100
@@ -34,9 +35,9 @@ class DiceLoss(torch.nn.Module):
 
 
 class DiceBCELoss(torch.nn.Module):
-    def __init__(self, bce_weight: float = 1.0, smooth: float = 1e-5) -> None:
+    def __init__(self, bce_weight: float = 1.0, pos_weight: torch.Tensor = None, smooth: float = 1e-5) -> None:
         super().__init__()
-        self.bce = torch.nn.BCEWithLogitsLoss()
+        self.bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         self.dice = DiceLoss(smooth)
         self.bce_weight = bce_weight
 
@@ -49,7 +50,10 @@ class DiceBCELoss(torch.nn.Module):
 
 
 if __name__ == "__main__":
-    loss_fn = DiceBCELoss(bce_weight=3.0)
+    pos_weights = calculate_pos_weight(
+        torch.load("data/metadata.pt")
+    )  # Calculate pos weights for the dataset
+    loss_fn = DiceBCELoss(bce_weight=3.0, pos_weight=pos_weights)
 
     def model_fn():
         return UNet(3)
