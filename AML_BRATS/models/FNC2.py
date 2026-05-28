@@ -194,3 +194,34 @@ if __name__ == "__main__":
     print(f"Uncertainty max      : {uncertainty.max().item()}")
     print(f"Uncertainty min      : {uncertainty.min().item()}")
     print(f"Uncertainty variance : {uncertainty.var().item()}")
+
+
+
+#----------------------------------------------------------
+#METRICS
+
+def dice_score(pred, target, smooth=1e-6):
+    """
+    For overlap between prediction and true tumour
+    """
+    pred = torch.argmax(pred, dim=1)
+    pred = pred.contiguous().view(-1).float()
+    target = target.contiguous().view(-1).float()
+    intersection = (pred * target).sum()
+    dice = (2.0* intersection + smooth) / (pred.sum() + target.sum() + smooth)
+    return dice.item()
+    
+def iou_score(pred, target, smooth=1e-6):
+    """
+    How much predicted region matches real region
+    """
+    pred = torch.argmax(pred, dim=1)
+    pred = pred.contiguous().view(-1).float()
+    target = target.contiguous().view(-1).float()
+    intersection = (pred * target).sum()
+    union = pred.sum() + target.sum() - intersection
+    iou = (intersection + smooth) / (union + smooth)
+    return iou.item()
+
+
+
