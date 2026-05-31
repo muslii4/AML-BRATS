@@ -55,14 +55,14 @@ class DiceBCELoss(torch.nn.Module):
 def train(cfg: DictConfig):
     bce_weight = cfg.training.bce_weight
     num_epochs = cfg.training.num_epochs
-    mc_dropout = cfg.model.MC_Dropout
-    num_passes = cfg.model.num_passes
-    probability_dropout = cfg.model.dropout_p
+    mc_dropout = cfg.training.MC_Dropout
+    num_passes = cfg.training.num_passes
+    probability_dropout = cfg.training.dropout_p
 
     loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
     def model_fn():
-        model = SegNet(4, MC_Dropout=mc_dropout, num_passes=num_passes, dropout_p=probability_dropout)
+        model = SegNet(3, MC_Dropout=mc_dropout, num_passes=num_passes, dropout_p=probability_dropout)
         if cfg.initial_bias:
             if model.out.bias is None:
                 raise RuntimeError
