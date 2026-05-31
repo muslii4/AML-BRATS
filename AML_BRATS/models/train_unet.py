@@ -1,25 +1,10 @@
+import hydra
 import torch
+from omegaconf import DictConfig
 
+from .metrics import calculate_dice
 from .train_model import train_k_fold
 from .unet import UNet
-
-LR = 1e-2
-NUM_EPOCHS = 100
-
-
-def calculate_dice(
-    probs: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-5
-) -> torch.Tensor:
-    num = 2 * (probs * targets).sum(dim=(2, 3))
-    den = probs.sum(dim=(2, 3)) + targets.sum(dim=(2, 3))
-
-    dice = (num + smooth) / (den + smooth)
-    valid_channels = targets.sum(dim=(2, 3)) > 0
-
-    if valid_channels.any():
-        return dice.masked_select(valid_channels).mean()
-
-    return dice.new_tensor(0.0)
 
 
 class DiceLoss(torch.nn.Module):
@@ -48,20 +33,69 @@ class DiceBCELoss(torch.nn.Module):
         )
 
 
-if __name__ == "__main__":
-    loss_fn = DiceBCELoss(bce_weight=3.0)
+@hydra.main(
+    config_path="../config/models", config_name="unet", version_base=None
+)
+def train(cfg: DictConfig):
+    bce_weight = cfg.training.bce_weight
+    num_epochs = cfg.training.num_epochs
+
+    loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
     def model_fn():
-        return UNet(3)
+        model = UNet(3, cfg.batch_norm)
+        if cfg.initial_bias:
+            if model.out.bias is None:
+                raise RuntimeError
+            torch.nn.init.constant_(model.out.bias, -2.0)
+        return model
 
     def optimizer_fn(params):
-        return torch.optim.SGD(params, lr=LR, momentum=0.9)
+        optimizer = cfg.training.optimizer
+        if optimizer.type == "sgd":
+            return torch.optim.SGD(
+                params, lr=optimizer.sgd.lr, momentum=optimizer.sgd.momentum
+            )
+        elif optimizer.type == "adam":
+            return torch.optim.Adam(
+                params,
+                lr=optimizer.adam.lr,
+                weight_decay=optimizer.adam.weight_decay,
+            )
+        else:
+            raise ValueError
+
+    opt = cfg.training.optimizer
+    opt_type = opt.type
+    parts = [f"UNET_HYD_{num_epochs}EPOCHS", opt_type]
+    if cfg.initial_bias:
+        parts.append("INBIAS")
+    if cfg.batch_norm:
+        parts.append("BNORM")
+    if opt_type == "sgd":
+        parts.append(f"LR{opt.sgd.lr}")
+        parts.append(f"MOM{opt.sgd.momentum}")
+    elif opt_type == "adam":
+        parts.append(f"LR{opt.adam.lr}")
+        parts.append(f"WD{opt.adam.weight_decay}")
+
+    parts.append(f"bce{(bce_weight)}")
+    if not cfg.training.augmentation:
+        parts.append("NOAUG")
+
+    run_name = "_".join(parts)
 
     train_k_fold(
         model_fn,
         optimizer_fn,
         loss_fn,
         metrics={"dice": calculate_dice},
-        epochs=NUM_EPOCHS,
-        run_name=f"UNET_MDICEBCE3_SGD_{NUM_EPOCHS}EPOCHS_{LR}LR",
+        epochs=cfg.training.num_epochs,
+        run_name=run_name,
+        augment_train=cfg.training.augmentation,
+        batch_size=cfg.training.batch_size,
     )
+
+
+if __name__ == "__main__":
+    train()

@@ -6,18 +6,14 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
-import os
-print(os.getcwd())
-
-
-DATA_PATH = Path("AML_BRATS/data/BraTS2020_training_data/content/data")
+DATA_PATH = Path("data/BraTS2020_training_data")
 
 
 def _process_path(path_str: str) -> Path:
     """Convert the Kaggle CSV path to the local project path."""
     path = Path(path_str)
     filename = path.name
-    return DATA_PATH/ filename
+    return DATA_PATH / "content/data" / filename
 
 
 def load_metadata(path: Path) -> pd.DataFrame:
@@ -82,35 +78,6 @@ class BRATSDataset(Dataset):
         return len(self.metadata)
 
     def __getitem__(self, idx: int) -> dict[str, np.ndarray]:
-
-        #File path for selected slice from the metadata frame
-        path = self.metadata.iloc[idx]["slice_path"]
-
-        #Open the .h5 file 
-        with h5py.File(self.base_path / path, "r") as f:
-
-            image: np.ndarray = f["image"][()]
-            #Load the segmentation mask as array  
-            mask: np.ndarray = f["mask"][()]
-
-    # Convert image values to float32 because normalization creates decimal values
-        image = image.astype(np.float32)
-
-        # Create a mask showing where the brain exists
-        # A pixel is considered brain if at least one MRI channel is non-zero
-        brain_mask = np.any(image > 0, axis=-1)
-
-        #Separately looping through each MRI channel
-        for channel in range(image.shape[-1]):
-            #Get one MRI channel
-            channel_data = image[:, :, channel]
-        # Select only the brain pixels from this channel, background ignore
-            brain_pixels = channel_data[brain_mask]
-
-        #Ensure brain pixels 
-            if len(brain_pixels) > 0:
-            #Calculate mean and std intensity of brian pixels
-
         path = self.metadata.iloc[idx]["slice_path"]
 
         with h5py.File(self.base_path / path, "r") as f:
@@ -131,22 +98,9 @@ class BRATSDataset(Dataset):
                 std = brain_pixels.std()
 
                 if std > 0:
-                    # Z-score normalization only to brain pixels with formula
-                    channel_data[brain_mask] = (channel_data[brain_mask] - mean) / std
-
-
                     channel_data[brain_mask] = (
                         channel_data[brain_mask] - mean
                     ) / std
-
-            #Bsckground pixels remain as 0
-            channel_data[~brain_mask] = 0
-            #Normalised channel goes back into the full imafe
-            image[:, :, channel] = channel_data
-
-        #if augmentaton is enabled:
-        if self.augmented:
-            #Apply augmentation to both image and mask
 
             channel_data[~brain_mask] = 0
 
@@ -216,9 +170,7 @@ def get_dataset_folds(
 
 
 if __name__ == "__main__":
-
-    metadata = load_metadata(DATA_PATH / "meta_data.csv")
-
+    metadata = load_metadata(DATA_PATH / "content/data/meta_data.csv")
     train_metadata, test_metadata = split_by_volume(metadata)
     cv_splits = make_cv_splits(train_metadata, k=5)
     test_ds = BRATSDataset(test_metadata)
