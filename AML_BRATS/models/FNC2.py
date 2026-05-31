@@ -8,11 +8,17 @@ this model is based on The SegNet architecture .
     
 
 class EncoderBlock(nn.Module):
+    """Three layered convolutional block with max pooling to decrease the image size
+    """
     def __init__(self, in_channels, out_channels) -> None:
         super().__init__()
 
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
 
@@ -36,6 +42,8 @@ class EncoderBlock(nn.Module):
 
 
 class DecoderBlock(nn.Module):
+    """Three layered convolutional block with max unpooling to increase the image size
+    """
     def __init__(self, in_channels, out_channels) -> None:
         super().__init__()
 
@@ -46,6 +54,10 @@ class DecoderBlock(nn.Module):
 
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
 
@@ -66,12 +78,13 @@ class SegNet(nn.Module):
     SegNet architecture for semantic segmentation
     using a 5 block encoder-decoder structure with optional Monte Carlo Dropout for uncertainty estimation
     """
-    def __init__(self, num_classes=4, dropout_p= 0.2, MC_Dropout=False) -> None:
+    def __init__(self, num_classes=4, dropout_p= 0.2, MC_Dropout=False, num_passes=20) -> None:
         """
         Args: 
             num_classes: Number of output classes for segmentation
             dropout_p: Dropout probability for Monte Carlo Dropout
             MC_Dropout: If True, enables Monte Carlo Dropout for uncertainty estimation
+            num_passes: Number of passes for Monte Carlo Dropout
 
         ATTRIBUTES:
             conv1, conv2, conv3, conv4, conv5: Encoder blocks which uses convolutional layers followed by max pooling
@@ -81,6 +94,7 @@ class SegNet(nn.Module):
         super().__init__() 
         self.MC_Dropout = MC_Dropout
         self.dropout_p = dropout_p
+        self.num_passes = num_passes
         # Encoder 
         self.conv1 = EncoderBlock(in_channels=4, out_channels=16)
         self.conv2 = EncoderBlock(in_channels=16, out_channels=32)
@@ -100,7 +114,9 @@ class SegNet(nn.Module):
             kernel_size=1
         )
 
-    def forward(self, x) -> torch.Tensor:
+    def _forward(
+        self, x: torch.Tensor, force_mc_dropout: bool = False
+    ) -> torch.Tensor:
         """
         Forward pass through the SegNet
 
@@ -109,43 +125,63 @@ class SegNet(nn.Module):
         RETURNS:
             Output tensor of shape [batch_size, num_classes, height, width]
         """
+        use_mc_dropout = self.MC_Dropout and (self.training or force_mc_dropout)
+
         # encoder 
         x, idx1, size1 = self.conv1(x)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x, idx2, size2 = self.conv2(x)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x, idx3, size3 = self.conv3(x)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x, idx4, size4 = self.conv4(x)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x, idx5, size5 = self.conv5(x)
 
 
         # decoder
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x = self.decon5(x, idx5, size5)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x = self.decon4(x, idx4, size4)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x = self.decon3(x, idx3, size3)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x = self.decon2(x, idx2, size2)
-        if self.MC_Dropout:
+        if use_mc_dropout:
             x = F.dropout2d(x, p=self.dropout_p, training=True)
         x = self.decon1(x, idx1, size1)
     
         x = self.final(x)
         return x
     
-    def mc_dropout_forward(self, x, num_passes=20):
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Standard call path for training and inference.
+        If MC dropout is enabled and the model is in eval mode, this returns
+        the mean logits over num_passes stochastic forward passes.
+        """
+        if self.MC_Dropout and (not self.training) and self.num_passes > 1:
+            logits = [
+                self._forward(x, force_mc_dropout=True)
+                for _ in range(self.num_passes)
+            ]
+            return torch.stack(logits, dim=0).mean(dim=0)
+
+        return self._forward(x)
+        
+    def _mc_dropout_forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Run multiple forward passes with dropout enabled for uncertainty estimation
         
@@ -165,9 +201,9 @@ class SegNet(nn.Module):
         predictions = []
         self.eval()
         
-        with torch.no_grad(): 
-            for _ in range(num_passes):
-                out = self.forward(x)
+        with torch.no_grad():
+            for _ in range(self.num_passes):
+                out = self._forward(x, force_mc_dropout=True)
                 predictions.append(torch.softmax(out, dim=1)) 
 
         predictions = torch.stack(predictions)
@@ -176,6 +212,12 @@ class SegNet(nn.Module):
         epistemic_uncertainty = variance_pred.mean(dim=1) 
         
         return mean_pred, variance_pred, epistemic_uncertainty
+
+    def predict_with_uncertainty(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Convenience wrapper for uncertainty outputs in eval mode."""
+        return self._mc_dropout_forward(x)
 
 
 if __name__ == "__main__":
@@ -186,9 +228,14 @@ if __name__ == "__main__":
     out = model(x)
     print(f"Regular output shape: {out.shape}")
     
-    # MC Dropout forward pass 
-    model.MC_Dropout = True  
-    mean, variance, uncertainty = model.mc_dropout_forward(x, num_passes=20)
+    # MC Dropout forward pass
+    model.MC_Dropout = True
+    model.num_passes = 20
+    model.eval()
+    out_mc = model(x)
+    mean, variance, uncertainty = model.predict_with_uncertainty(x)
+
+    print(f"MC-averaged output shape: {out_mc.shape}")
     
     print(f"Uncertainty mean     : {uncertainty.mean().item()}")
     print(f"Uncertainty max      : {uncertainty.max().item()}")

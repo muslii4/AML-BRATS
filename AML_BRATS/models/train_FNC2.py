@@ -1,4 +1,6 @@
+import hydra 
 import torch
+from omegaconf import DictConfig
 from .FNC2 import SegNet, dice_score, iou_score
 from .train_model import train_k_fold
 
@@ -47,24 +49,72 @@ class DiceBCELoss(torch.nn.Module):
         )
 
 
-if __name__ == "__main__":
+@hydra.main(
+        config_path="../config/models", config_name="SegNet", version_base=None
+)
+def train(cfg: DictConfig):
+    bce_weight = cfg.training.bce_weight
+    num_epochs = cfg.training.num_epochs
+    mc_dropout = cfg.model.MC_Dropout
+    num_passes = cfg.model.num_passes
+    probability_dropout = cfg.model.dropout_p
 
-    def model_fn() -> torch.nn.Module:
-        return SegNet(num_classes=4, MC_Dropout=False)
+    loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
-
-    loss_fn = DiceBCELoss(bce_weight=3.0)
+    def model_fn():
+        model = SegNet(4, MC_Dropout=mc_dropout, num_passes=num_passes, dropout_p=probability_dropout)
+        if cfg.initial_bias:
+            if model.out.bias is None:
+                raise RuntimeError
+            torch.nn.init.constant_(model.out.bias, -2.0)
+        return model
 
     def optimizer_fn(params):
-        return torch.optim.SGD(params, lr=LR, momentum=0.9)
+        optimizer = cfg.training.optimizer
+        if optimizer.type == "sgd":
+            return torch.optim.SGD(
+                params, lr=optimizer.sgd.lr, momentum=optimizer.sgd.momentum
+            )
+        elif optimizer.type == "adam":
+            return torch.optim.Adam(
+                params,
+                lr=optimizer.adam.lr,
+                weight_decay=optimizer.adam.weight_decay,
+            )
+        else:
+            raise ValueError
 
+    opt = cfg.training.optimizer
+    opt_type = opt.type
+    parts = [f"SegNet_HYD_{num_epochs}EPOCHS", opt_type]
+    if cfg.initial_bias:
+        parts.append("INBIAS")
+    if cfg.batch_norm:
+        parts.append("BNORM")
+    if opt_type == "sgd":
+        parts.append(f"LR{opt.sgd.lr}")
+        parts.append(f"MOM{opt.sgd.momentum}")
+    elif opt_type == "adam":
+        parts.append(f"LR{opt.adam.lr}")
+        parts.append(f"WD{opt.adam.weight_decay}")
+
+    parts.append(f"bce{(bce_weight)}")
+    if not cfg.training.augmentation:
+        parts.append("NOAUG")
+
+    run_name = "_".join(parts)
 
     train_k_fold(
         model_fn,
         optimizer_fn,
         loss_fn,
-        epochs=NUM_EPOCHS,
-        run_name=f"SegNet_{NUM_EPOCHS}EPOCHS_{LR}LR",
-        batch_size=64,
         metrics={"dice": dice_score, "iou": iou_score},
+        epochs=cfg.training.num_epochs,
+        run_name=run_name,
+        augment_train=cfg.training.augmentation,
+        batch_size=cfg.training.batch_size,
     )
+    
+if __name__ == "__main__":
+    train()
+
