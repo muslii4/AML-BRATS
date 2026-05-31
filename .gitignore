@@ -8,8 +8,7 @@ venv/
 data/*
 runs/
 outputs/
-models/
-
+models/*.pkl
 slurm-*
 AML_BRATS/data/BraTS2020_training_data/content/data/
 
