@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
-DATA_PATH = Path("data/BraTS2020_training_data")
+DATA_PATH = Path("AML_BRATS/data/BraTS2020_training_data") #CHANGE IT BACK IF NEEDED DATA_PATH = Path("data/BraTS2020_training_data")
 
 
 def _process_path(path_str: str) -> Path:

@@ -252,6 +252,19 @@ def dice_score(pred, target, smooth=1e-6):
     For overlap between prediction and true tumour
     """
     pred = torch.argmax(pred, dim=1)
+    target = torch.argmax(target, dim=1)
+    pred = (pred > 0).float()
+    target = (target > 0).float()
+    pred = pred.contiguous().view(-1)
+    target = target.contiguous().view(-1)
+    intersection = (pred * target).sum()
+
+    dice = ((2.0 * intersection + smooth)/ (pred.sum() + target.sum() + smooth))
+    return dice
+
+"""
+def dice_score(pred, target, smooth=1e-6):
+    pred = torch.argmax(pred, dim=1)
     pred = (pred > 0).float()
     target = (target > 0).float()
     pred = pred.contiguous().view(-1)
@@ -260,11 +273,25 @@ def dice_score(pred, target, smooth=1e-6):
     
     dice = ((2.0 * intersection + smooth)/ (pred.sum() + target.sum() + smooth) )
     return dice.item()
+
+"""
     
 def iou_score(pred, target, smooth=1e-6):
     """
     How much predicted region matches real region
     """
+    pred = torch.argmax(pred, dim=1)
+    target = torch.argmax(target, dim=1)
+    pred = (pred > 0).float()
+    target = (target > 0).float()
+    pred = pred.contiguous().view(-1)
+    target = target.contiguous().view(-1)
+    intersection = (pred * target).sum()
+    union = pred.sum() + target.sum() - intersection
+    
+    iou = (intersection + smooth) / (union + smooth)
+    return iou
+"""
     pred = torch.argmax(pred, dim=1)
     pred = (pred > 0).float()
     target = (target > 0).float()
@@ -275,6 +302,7 @@ def iou_score(pred, target, smooth=1e-6):
     
     iou = (intersection + smooth) / (union + smooth)
     return iou.item()
+"""
 
 
 

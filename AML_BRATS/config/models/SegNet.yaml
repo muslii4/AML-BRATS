@@ -5,7 +5,7 @@ training:
   MC_Dropout: false
   num_passes: 20
   dropout_p: 0.2
-  num_epochs: 100
+  num_epochs: 1 #100
   batch_size: 64
   bce_weight: 3
   augmentation: true
