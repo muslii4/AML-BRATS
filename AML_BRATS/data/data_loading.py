@@ -19,7 +19,6 @@ def _process_path(path_str: str) -> Path:
 def load_metadata(path: Path) -> pd.DataFrame:
     """Load the metadata and processess all paths."""
     metadata = pd.read_csv(path)
-    metadata = metadata[:500]  # XXX: TEMPORARY
     metadata["slice_path"] = metadata["slice_path"].map(_process_path)
     return metadata
 
