@@ -48,12 +48,17 @@ def validation_epoch(
     model: torch.nn.Module,
     loss_fn: Callable[..., torch.Tensor],
     device: torch.device,
-) -> float:
-    """Run one validation epoch and return the average loss."""
+    metrics: dict[str, Callable[..., torch.Tensor]] = None,
+) -> tuple[float, dict[str, float]]:
+    """Run one validation epoch and return the average loss and computed metrics."""
     model.to(device)
     model.eval()
     val_loss = 0.0
     total_samples = 0
+
+    probs_batches: list[torch.Tensor] = []
+    targets_batches: list[torch.Tensor] = []
+    collect_outputs = metrics is not None and len(metrics) > 0
 
     with torch.no_grad():
         for datapoint in tqdm(dataloader, desc="Validation"):
@@ -69,7 +74,19 @@ def validation_epoch(
             val_loss += loss.item() * batch_size
             total_samples += batch_size
 
-    return val_loss / total_samples if total_samples else 0.0
+            if collect_outputs:
+                probs_batches.append(y_pred.sigmoid().cpu())
+                targets_batches.append(y_true.cpu())
+
+    avg_loss = val_loss / total_samples if total_samples else 0.0
+
+    metric_avgs: dict[str, float] = {}
+    if collect_outputs and probs_batches:
+        val_probs = torch.cat(probs_batches, dim=0)
+        val_targets = torch.cat(targets_batches, dim=0)
+        metric_avgs = compute_metrics_from_outputs(val_probs, val_targets, metrics)
+
+    return avg_loss, metric_avgs
 
 
 def compute_metrics_from_outputs(
@@ -77,47 +94,22 @@ def compute_metrics_from_outputs(
     targets: torch.Tensor,
     metrics: dict[str, Callable[..., torch.Tensor]],
 ) -> dict[str, float]:
-    """Compute all metrics from collected probabilities and targets."""
-    metric_avgs: dict[str, float] = {}
+    """Compute all metrics (mean and standard error) from collected probabilities and targets."""
+    results: dict[str, float] = {}
 
     for metric_name, metric_fn in metrics.items():
-        metric_val = metric_fn(probs, targets)
+        num_samples = probs.size(0)
+        scores = []
+        for i in range(num_samples):
+            val = metric_fn(probs[i:i+1], targets[i:i+1])
+            scores.append(val.item())
 
-        if metric_val.numel() == 1:
-            metric_val = float(metric_val.item())
-        else:
-            metric_val = float(metric_val.mean().item())
+        scores_tensor = torch.tensor(scores, dtype=torch.float32)
+        results[metric_name] = float(scores_tensor.mean().item())
+        std_val = float(scores_tensor.std().item()) if num_samples > 1 else 0.0
+        results[f"{metric_name}_se"] = std_val / (num_samples ** 0.5)
 
-        metric_avgs[metric_name] = metric_val
-
-    return metric_avgs
-
-
-@torch.no_grad()
-def collect_validation_outputs(
-    dataloader: DataLoader,
-    model: torch.nn.Module,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Collect all validation probabilities and targets for epoch-level metrics."""
-    model.to(device)
-    model.eval()
-
-    probs_batches: list[torch.Tensor] = []
-    targets_batches: list[torch.Tensor] = []
-
-    for datapoint in tqdm(dataloader, desc="Collecting validation outputs"):
-        X = datapoint["image"].to(device)
-        y_true = datapoint["mask"].to(device)
-
-        probs_batches.append(model(X).sigmoid().cpu())
-        targets_batches.append(y_true.cpu())
-
-    if not probs_batches:
-        empty = torch.empty(0)
-        return empty, empty
-
-    return torch.cat(probs_batches, dim=0), torch.cat(targets_batches, dim=0)
+    return results
 
 
 def _get_device() -> torch.device:
@@ -152,17 +144,12 @@ def train_model(
         print(f"Epoch {epoch + 1}")
         train_loss = train_epoch(train_dl, model, loss_fn, optimizer, device)
         writer.add_scalar("Loss/train", train_loss, epoch)
-        val_loss = validation_epoch(validation_dl, model, loss_fn, device)
+        val_loss, metric_avgs = validation_epoch(
+            validation_dl, model, loss_fn, device, metrics=metrics
+        )
         writer.add_scalar("Loss/val", val_loss, epoch)
 
-        val_probs, val_targets = collect_validation_outputs(
-            validation_dl, model, device
-        )
-
         if metrics:
-            metric_avgs = compute_metrics_from_outputs(
-                val_probs, val_targets, metrics
-            )
             for metric_name, metric_avg in metric_avgs.items():
                 writer.add_scalar(
                     f"Metrics/{metric_name}/val", metric_avg, epoch
