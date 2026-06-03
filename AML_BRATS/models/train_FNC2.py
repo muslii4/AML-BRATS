@@ -1,9 +1,9 @@
-import hydra 
+import hydra
 import torch
 from omegaconf import DictConfig
+
 from .FNC2 import SegNet, dice_score, iou_score
 from .train_model import train_k_fold
-
 
 LR = 1e-2
 NUM_EPOCHS = 100
@@ -50,7 +50,7 @@ class DiceBCELoss(torch.nn.Module):
 
 
 @hydra.main(
-        config_path="../config/models", config_name="SegNet", version_base=None
+    config_path="../config/models", config_name="SegNet", version_base=None
 )
 def train(cfg: DictConfig):
     bce_weight = cfg.training.bce_weight
@@ -62,7 +62,12 @@ def train(cfg: DictConfig):
     loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
     def model_fn():
-        model = SegNet(3, MC_Dropout=mc_dropout, num_passes=num_passes, dropout_p=probability_dropout)
+        model = SegNet(
+            3,
+            MC_Dropout=mc_dropout,
+            num_passes=num_passes,
+            dropout_p=probability_dropout,
+        )
         if cfg.initial_bias:
             if model.out.bias is None:
                 raise RuntimeError
@@ -89,8 +94,9 @@ def train(cfg: DictConfig):
     parts = [f"SegNet_HYD_{num_epochs}EPOCHS", opt_type]
     if cfg.initial_bias:
         parts.append("INBIAS")
-    if cfg.batch_norm:
-        parts.append("BNORM")
+    parts.append(f"MCDropout{cfg.training.MC_Dropout}")
+    parts.append(f"passes{cfg.training.num_passes}")
+    parts.append(f"drop{cfg.training.dropout_p}")
     if opt_type == "sgd":
         parts.append(f"LR{opt.sgd.lr}")
         parts.append(f"MOM{opt.sgd.momentum}")
@@ -114,7 +120,7 @@ def train(cfg: DictConfig):
         augment_train=cfg.training.augmentation,
         batch_size=cfg.training.batch_size,
     )
-    
+
+
 if __name__ == "__main__":
     train()
-
