@@ -58,6 +58,7 @@ def validation_epoch(
 
     probs_batches: list[torch.Tensor] = []
     targets_batches: list[torch.Tensor] = []
+    volumes: list[str] = []
     collect_outputs = metrics is not None and len(metrics) > 0
 
     with torch.no_grad():
@@ -77,6 +78,7 @@ def validation_epoch(
             if collect_outputs:
                 probs_batches.append(y_pred.sigmoid().cpu())
                 targets_batches.append(y_true.cpu())
+                volumes.extend(datapoint["volume"])
 
     avg_loss = val_loss / total_samples if total_samples else 0.0
 
@@ -84,7 +86,9 @@ def validation_epoch(
     if collect_outputs and probs_batches:
         val_probs = torch.cat(probs_batches, dim=0)
         val_targets = torch.cat(targets_batches, dim=0)
-        metric_avgs = compute_metrics_from_outputs(val_probs, val_targets, metrics)
+        metric_avgs = compute_metrics_from_outputs(
+            val_probs, val_targets, metrics, volumes
+        )
 
     return avg_loss, metric_avgs
 
@@ -93,21 +97,35 @@ def compute_metrics_from_outputs(
     probs: torch.Tensor,
     targets: torch.Tensor,
     metrics: dict[str, Callable[..., torch.Tensor]],
+    volumes: list[str],
 ) -> dict[str, float]:
     """Compute all metrics (mean and standard error) from collected probabilities and targets."""
     results: dict[str, float] = {}
 
-    for metric_name, metric_fn in metrics.items():
-        num_samples = probs.size(0)
-        scores = []
-        for i in range(num_samples):
-            val = metric_fn(probs[i:i+1], targets[i:i+1])
-            scores.append(val.item())
+    patient_indices: dict[str, list[int]] = {}
+    for idx, vol in enumerate(volumes):
+        if vol not in patient_indices:
+            patient_indices[vol] = [idx]
+        else:
+            patient_indices[vol].append(idx)
 
-        scores_tensor = torch.tensor(scores, dtype=torch.float32)
+    for metric_name, metric_fn in metrics.items():
+        patient_scores = []
+        for vol, indices in patient_indices.items():
+            indices_t = torch.tensor(indices, dtype=torch.long)
+            p_probs = probs[indices_t]
+            p_targets = targets[indices_t]
+
+            val = metric_fn(p_probs, p_targets)
+            patient_scores.append(val.item())
+
+        scores_tensor = torch.tensor(patient_scores, dtype=torch.float32)
+        num_patients = len(patient_scores)
         results[metric_name] = float(scores_tensor.mean().item())
-        std_val = float(scores_tensor.std().item()) if num_samples > 1 else 0.0
-        results[f"{metric_name}_se"] = std_val / (num_samples ** 0.5)
+        std_val = (
+            float(scores_tensor.std().item()) if num_patients > 1 else 0.0
+        )
+        results[f"{metric_name}_se"] = std_val / (num_patients**0.5)
 
     return results
 
