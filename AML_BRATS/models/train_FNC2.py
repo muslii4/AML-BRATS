@@ -2,9 +2,11 @@ import hydra
 import torch
 from omegaconf import DictConfig
 
-from .metrics import calculate_dice
+from .FNC2 import SegNet, dice_score, iou_score
 from .train_model import train_k_fold
-from .unet import UNet
+
+LR = 1e-2
+NUM_EPOCHS = 100
 
 
 class DiceLoss(torch.nn.Module):
@@ -15,13 +17,27 @@ class DiceLoss(torch.nn.Module):
     def forward(
         self, logits: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
-        return 1 - calculate_dice(logits.sigmoid(), targets, self.smooth)
+        probs = logits.softmax(dim=1)
+        num = 2 * (probs * targets).sum(dim=(2, 3))
+        den = probs.sum(dim=(2, 3)) + targets.sum(dim=(2, 3))
+
+        dice = (num + self.smooth) / (den + self.smooth)
+        valid_channels = targets.sum(dim=(2, 3)) > 0
+
+        if valid_channels.any():
+            return 1 - dice.masked_select(valid_channels).mean()
+
+        return dice.new_tensor(1.0)
 
 
 class DiceBCELoss(torch.nn.Module):
-    def __init__(self, bce_weight: float = 1.0, pos_weight: torch.Tensor = None, smooth: float = 1e-5) -> None:
+    def __init__(
+        self,
+        bce_weight: float = 1.0,
+        smooth: float = 1e-5,
+    ) -> None:
         super().__init__()
-        self.bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        self.bce = torch.nn.BCEWithLogitsLoss()
         self.dice = DiceLoss(smooth)
         self.bce_weight = bce_weight
 
@@ -34,16 +50,24 @@ class DiceBCELoss(torch.nn.Module):
 
 
 @hydra.main(
-    config_path="../config/models", config_name="unet", version_base=None
+    config_path="../config/models", config_name="SegNet", version_base=None
 )
 def train(cfg: DictConfig):
     bce_weight = cfg.training.bce_weight
     num_epochs = cfg.training.num_epochs
+    mc_dropout = cfg.training.MC_Dropout
+    num_passes = cfg.training.num_passes
+    probability_dropout = cfg.training.dropout_p
 
     loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
     def model_fn():
-        model = UNet(3, cfg.batch_norm)
+        model = SegNet(
+            3,
+            MC_Dropout=mc_dropout,
+            num_passes=num_passes,
+            dropout_p=probability_dropout,
+        )
         if cfg.initial_bias:
             if model.out.bias is None:
                 raise RuntimeError
@@ -67,11 +91,12 @@ def train(cfg: DictConfig):
 
     opt = cfg.training.optimizer
     opt_type = opt.type
-    parts = [f"UNET_HYD_{num_epochs}EPOCHS", opt_type]
+    parts = [f"SegNet_HYD_{num_epochs}EPOCHS", opt_type]
     if cfg.initial_bias:
         parts.append("INBIAS")
-    if cfg.batch_norm:
-        parts.append("BNORM")
+    parts.append(f"MCDropout{cfg.training.MC_Dropout}")
+    parts.append(f"passes{cfg.training.num_passes}")
+    parts.append(f"drop{cfg.training.dropout_p}")
     if opt_type == "sgd":
         parts.append(f"LR{opt.sgd.lr}")
         parts.append(f"MOM{opt.sgd.momentum}")
@@ -89,7 +114,7 @@ def train(cfg: DictConfig):
         model_fn,
         optimizer_fn,
         loss_fn,
-        metrics={"dice": calculate_dice},
+        metrics={"dice": dice_score, "iou": iou_score},
         epochs=cfg.training.num_epochs,
         run_name=run_name,
         augment_train=cfg.training.augmentation,

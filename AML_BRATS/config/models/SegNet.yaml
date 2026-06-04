@@ -1,0 +1,21 @@
+initial_bias: false
+
+training:
+  MC_Dropout: false
+  num_passes: 20
+  dropout_p: 0.2
+  num_epochs: 20
+  batch_size: 64
+  bce_weight: 3
+  augmentation: true
+
+  optimizer:
+    type: adam
+
+    adam:
+      lr: 1e-4
+      weight_decay: 1e-2
+
+    sgd:
+      lr: 1e-2
+      momentum: 0.9

@@ -102,7 +102,7 @@ class BRATSDataset(Dataset):
     def __len__(self) -> int:
         return len(self.metadata)
 
-    def __getitem__(self, idx: int) -> dict[str, np.ndarray]:
+    def __getitem__(self, idx: int) -> dict[str, np.ndarray | str]:
         path = self.metadata.iloc[idx]["slice_path"]
 
         with h5py.File(self.base_path / path, "r") as f:
@@ -124,6 +124,7 @@ class BRATSDataset(Dataset):
         return {
             "image": image,
             "mask": mask,
+            "volume": self.metadata.iloc[idx]["volume"],
         }
 
 
