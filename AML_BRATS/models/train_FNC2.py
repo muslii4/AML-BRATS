@@ -3,6 +3,7 @@ import torch
 from omegaconf import DictConfig
 
 from .FNC2 import SegNet, dice_score, iou_score
+from .metrics import calculate_dice_all_channels
 from .train_model import train_k_fold
 
 LR = 1e-2
@@ -17,17 +18,9 @@ class DiceLoss(torch.nn.Module):
     def forward(
         self, logits: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
-        probs = logits.softmax(dim=1)
-        num = 2 * (probs * targets).sum(dim=(2, 3))
-        den = probs.sum(dim=(2, 3)) + targets.sum(dim=(2, 3))
-
-        dice = (num + self.smooth) / (den + self.smooth)
-        valid_channels = targets.sum(dim=(2, 3)) > 0
-
-        if valid_channels.any():
-            return 1 - dice.masked_select(valid_channels).mean()
-
-        return dice.new_tensor(1.0)
+        return 1 - calculate_dice_all_channels(
+            logits.sigmoid(), targets, self.smooth
+        )
 
 
 class DiceBCELoss(torch.nn.Module):
@@ -91,7 +84,7 @@ def train(cfg: DictConfig):
 
     opt = cfg.training.optimizer
     opt_type = opt.type
-    parts = [f"SegNet_HYD_{num_epochs}EPOCHS", opt_type]
+    parts = [f"SegNetv2_HYD_{num_epochs}EPOCHS", opt_type]
     if cfg.initial_bias:
         parts.append("INBIAS")
     parts.append(f"MCDropout{cfg.training.MC_Dropout}")
