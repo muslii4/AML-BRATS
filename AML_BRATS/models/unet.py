@@ -9,6 +9,10 @@ import torch
 import torch.nn as nn
 
 
+
+
+
+
 def double_convolution(in_channels, out_channels, batch_norm):
     """
     In the original paper implementation, the convolution operations were
@@ -88,6 +92,8 @@ if __name__ == "__main__":
     input_image = torch.rand((1, 4, 240, 240))
     model = UNet(num_classes=3, batch_norm=False)
     # Total parameters and trainable parameters.
+    for name, module in model.named_modules():
+        print(name, type(module).__name__)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"{total_params:,} total parameters.")
     total_trainable_params = sum(
