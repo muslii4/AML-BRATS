@@ -82,22 +82,26 @@ class BRATSDataset(Dataset):
         self.augmented = augmented
         self.base_path = base_path
 
-        self.train_transform = A.Compose(
-            [
-                A.Rotate(limit=5, border_mode=0, p=0.5),
-                A.ShiftScaleRotate(
-                    shift_limit=0.02,
-                    scale_limit=0.02,
-                    border_mode=0,
-                    rotate_limit=0,
-                    p=0.3,
+        self.train_transform = A.Compose([
+            A.Affine(
+                rotate=(-5, 5),
+                translate_percent={"x": (-0.02, 0.02), "y": (-0.02, 0.02)},
+                scale=(0.98, 1.02),
+                border_mode=0,
+                p=0.5,
+            ),
+            
+            A.GaussNoise(
+                std_range=(0.01, 0.02), 
+                p=0.3
+            ),
+
+            A.RandomBrightnessContrast(
+                brightness_limit=0.1,
+                contrast_limit=0.1,
+                p=0.3
                 ),
-                A.GaussNoise(std_range=(0.01, 0.02), p=0.3),
-                A.RandomBrightnessContrast(
-                    brightness_limit=0.1, contrast_limit=0.1, p=0.3
-                ),
-            ]
-        )
+            ])
 
     def __len__(self) -> int:
         return len(self.metadata)

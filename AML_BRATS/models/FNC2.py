@@ -232,6 +232,8 @@ if __name__ == "__main__":
     model.MC_Dropout = True
     model.num_passes = 20
     model.eval()
+    for name, module in model.named_modules():
+        print(name, type(module).__name__)
     out_mc = model(x)
     mean, variance, uncertainty = model.predict_with_uncertainty(x)
 

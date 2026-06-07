@@ -3,10 +3,69 @@ from typing import Callable
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import torch.nn.utils.prune as prune
 from tqdm import tqdm
-
+import torch_pruning as tp
 from ..data.data_loading import BRATSDataset, get_dataset_folds
+import time
 
+def pruner_random(model: torch.nn.Module, amount: float = 0.2) -> torch.nn.Module:
+    """ making it smaller but not necessarily faster at inference
+    Apply global unstructured pruning to the model by randomly pruning weights.
+    this is an iterative process that needs fine tuning after each pruning step 
+    """
+    model.eval()
+
+    parameters_to_prune = []
+    for module in model.modules():
+        if isinstance(module, torch.nn.Conv2d):
+            parameters_to_prune.append((module, "weight"))
+
+    # Apply global unstructured pruning
+    prune.global_unstructured(
+        parameters_to_prune,
+        pruning_method=prune.RandomUnstructured,
+        amount=amount,  
+    )
+
+    for module, _ in parameters_to_prune:
+        prune.remove(module, "weight")  
+
+    zero = sum((p == 0).sum().item() for p in model.parameters())
+    total = sum(p.numel() for p in model.parameters())
+    print(f"Sparsity: {zero/total:.1%}")
+
+    return model 
+
+def pruner_structured(model: torch.nn.Module, input_shape: tuple = (1, 4, 240, 240), amount: float = 0.2) -> tuple[torch.nn.Module, int, int]:
+    """ for making it faster at inference 
+    Apply structured pruning to the model based on L1 norm.
+    this is an iterative process that needs fine tuning after each pruning step
+    """
+    device = next(model.parameters()).device
+    shape = torch.randn(*input_shape).to(device)
+    model = model.eval()
+
+    params1 = sum(p.numel() for p in model.parameters())
+    print(f"Parameters before pruning: {params1:,}")
+
+    ignored_layers = []
+    for module in model.modules():
+        for name, module in model.named_modules():
+            if name in ["out", "final"]:   
+                ignored_layers.append(module)
+
+    pruner = tp.pruner.MagnitudePruner(
+        model,
+        example_inputs=shape,
+        importance=tp.importance.MagnitudeImportance(p=1),  # L1
+        pruning_ratio=amount,
+        ignored_layers=ignored_layers,
+    )
+    pruner.step()
+    params2 = sum(p.numel() for p in model.parameters())
+    print(f"Parameters after pruning: {params2:,}")
+    return model, params1, params2
 
 def train_epoch(
     dataloader: DataLoader,
@@ -224,6 +283,5 @@ def train_k_fold(
         )
         total_train_loss += train_loss
         total_val_loss += val_loss
-
     n = len(folds) if len(folds) > 0 else 1
     return total_train_loss / n, total_val_loss / n
