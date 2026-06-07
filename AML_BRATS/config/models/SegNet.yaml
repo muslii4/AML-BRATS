@@ -1,5 +1,5 @@
 initial_bias: false
-
+resume_from: null
 training:
   MC_Dropout: false
   num_passes: 20

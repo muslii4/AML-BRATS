@@ -1,0 +1,4 @@
+model_name: segnet
+model_state: segnet_smoke_final
+pruning_type: random
+amount: 0.2

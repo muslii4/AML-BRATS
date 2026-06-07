@@ -1,10 +1,14 @@
 import hydra
 import torch
 from omegaconf import DictConfig
+from pathlib import Path
 
 from .metrics import calculate_dice
 from .train_model import train_k_fold
 from .unet import UNet
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class DiceLoss(torch.nn.Module):
@@ -39,11 +43,26 @@ class DiceBCELoss(torch.nn.Module):
 def train(cfg: DictConfig):
     bce_weight = cfg.training.bce_weight
     num_epochs = cfg.training.num_epochs
+    resume_from = cfg.resume_from
 
     loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
     def model_fn():
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = UNet(3, cfg.batch_norm)
+        #for finetuning pruned
+        if resume_from:
+            checkpoint = Path(resume_from)
+            if not checkpoint.exists():
+                checkpoint = PROJECT_ROOT / resume_from
+            if not checkpoint.exists():
+                raise FileNotFoundError(
+                    f"Resume checkpoint not found: {resume_from}"
+                )
+            model.load_state_dict(
+                torch.load(checkpoint, weights_only=True, map_location=device)
+            )
+
         if cfg.initial_bias:
             if model.out.bias is None:
                 raise RuntimeError
