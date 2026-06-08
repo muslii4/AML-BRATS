@@ -2,7 +2,9 @@
 
 AML-BRATS is a project about segmentation models, with a focus on the tumor segmentation in slices of MRI scans. It provides a UNet model and includes a Streamlit demo interface for interactive use.
 
-## Instructions on how to launch the API
+The API is deployed at https://amlbrats.muslii.top/. The demo can be accessed at https://frontend-aml.onrender.com/.
+
+## Instructions on how to launch the API locally
 
 To clonde the repository:
 
