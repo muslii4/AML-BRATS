@@ -1,5 +1,6 @@
 initial_bias: false
 batch_norm: false
+resume_from: null
 training:
   num_epochs: 20
   batch_size: 64

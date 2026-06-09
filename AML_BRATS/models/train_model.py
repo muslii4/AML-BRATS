@@ -50,10 +50,9 @@ def pruner_structured(model: torch.nn.Module, input_shape: tuple = (1, 4, 240, 2
     print(f"Parameters before pruning: {params1:,}")
 
     ignored_layers = []
-    for module in model.modules():
-        for name, module in model.named_modules():
-            if name in ["out", "final"]:   
-                ignored_layers.append(module)
+    for name, module in model.named_modules():
+        if name in ["out", "final"]:
+            ignored_layers.append(module)
 
     pruner = tp.pruner.MagnitudePruner(
         model,

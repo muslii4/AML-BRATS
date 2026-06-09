@@ -1,14 +1,14 @@
 import hydra
 import torch
 from omegaconf import DictConfig
-
+from pathlib import Path
 from .FNC2 import SegNet, dice_score, iou_score
 from .metrics import calculate_dice_all_channels
 from .train_model import train_k_fold
 
 LR = 1e-2
 NUM_EPOCHS = 100
-
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 class DiceLoss(torch.nn.Module):
     def __init__(self, smooth: float = 1e-5) -> None:
@@ -51,10 +51,30 @@ def train(cfg: DictConfig):
     mc_dropout = cfg.training.MC_Dropout
     num_passes = cfg.training.num_passes
     probability_dropout = cfg.training.dropout_p
+    resume_from = cfg.resume_from
 
     loss_fn = DiceBCELoss(bce_weight=bce_weight)
 
     def model_fn():
+
+        if resume_from:
+            checkpoint = Path(resume_from)
+            if not checkpoint.exists():
+                checkpoint = PROJECT_ROOT / resume_from
+            if not checkpoint.exists():
+                raise FileNotFoundError(
+                    f"Resume checkpoint not found: {resume_from}"
+                )
+            
+            model = SegNet(
+                3,
+                MC_Dropout=mc_dropout,
+                num_passes=num_passes,
+                dropout_p=probability_dropout,
+            )
+            model.load_state_dict(torch.load(checkpoint, weights_only=True))
+            return model
+        
         model = SegNet(
             3,
             MC_Dropout=mc_dropout,
